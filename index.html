@@ -1,0 +1,77 @@
+// Service Worker — Platelet Donor Surveillance PWA
+// Version: 2.0 — Offline-first strategy
+
+const CACHE_NAME = 'plt-donor-v2';
+const ASSETS = [
+  './index.html',
+  './manifest.json',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js'
+];
+
+// Install: cache all assets
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => {
+      console.log('[SW] Caching assets');
+      return cache.addAll(ASSETS);
+    }).then(() => self.skipWaiting())
+  );
+});
+
+// Activate: clean old caches
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
+
+// Fetch: cache-first for assets, network-first for others
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+
+  // Always offline-first for our own assets
+  if (url.origin === location.origin || url.hostname === 'cdnjs.cloudflare.com') {
+    event.respondWith(
+      caches.match(event.request).then(cached => {
+        if (cached) return cached;
+        return fetch(event.request).then(response => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          }
+          return response;
+        }).catch(() => cached);
+      })
+    );
+  }
+});
+
+// Background sync for data backup (future feature)
+self.addEventListener('sync', event => {
+  if (event.tag === 'sync-data') {
+    console.log('[SW] Background sync triggered');
+  }
+});
+
+// Push notifications (future feature)
+self.addEventListener('push', event => {
+  if (event.data) {
+    const data = event.data.json();
+    self.registration.showNotification(data.title || 'PLT Alert', {
+      body: data.body || 'มีการแจ้งเตือนใหม่',
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-72.png',
+      vibrate: [200, 100, 200],
+      data: { url: data.url || './index.html' }
+    });
+  }
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data.url));
+});
